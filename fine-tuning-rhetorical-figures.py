@@ -301,7 +301,8 @@ for model_name in models_name:
 
     # Evaluate fine-tuned model
     pipe = pipeline('text-generation', model=fine_tuned_model, tokenizer=fine_tuned_tokenizer, max_length=500, temperature=0.1, device=0)
-    model_generation(pipe, test_dataset, f'{output_path}-decoding.csv')
+    for i in range(3):
+        model_generation(pipe, test_dataset, f'{output_path}-decoding-{i+1}.csv')
 
     # Clear memory
     del model

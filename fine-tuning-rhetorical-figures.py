@@ -17,6 +17,8 @@ from peft import LoraConfig, PeftModel
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from huggingface_hub import login
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 # Configurazione gestione memoria PyTorch
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 torch.set_default_dtype(torch.bfloat16 if torch.cuda.is_available() else torch.float32)
@@ -33,8 +35,8 @@ data_path_models = './models/rhetorical-figures'
 os.makedirs(data_path_models, exist_ok=True)
 
 models_name = [
-    'mistralai/Ministral-8B-Instruct-2410',
     'meta-llama/Llama-3.1-8B-Instruct',
+    'mistralai/Ministral-8B-Instruct-2410',
     'swap-uniba/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA',
     'Qwen/Qwen2.5-7B-Instruct',
     'sapienzanlp/Minerva-7B-instruct-v1.0',
@@ -93,7 +95,7 @@ def load_model(model_name):
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
-        device_map="auto"
+        device_map={"": 0}   # Forza su cuda:0
     )
     model.config.use_cache = False
     model.config.pretraining_tp = 1
@@ -126,7 +128,7 @@ def load_fine_tuned_model(model_name, fine_tuned_model_path):
     base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
-        device_map="auto"
+        device_map={"": 0}   # Anche qui forzato su cuda:0
     )
     model = PeftModel.from_pretrained(base_model, fine_tuned_model_path)
     model = model.merge_and_unload()
@@ -194,7 +196,7 @@ for model_name in models_name:
         tokenizer=fine_tuned_tokenizer,
         max_length=500,
         temperature=0.1,
-        device_map="auto",
+        device=0,   # Usa direttamente cuda:0
         torch_dtype=torch.bfloat16
     )
 

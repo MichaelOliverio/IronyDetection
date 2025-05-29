@@ -30,16 +30,13 @@ print(torch.cuda.is_available())
 print(torch.cuda.get_device_name(0))
 
 # Paths
-data_path_datasets = './datasets/twittiro'
+data_path_datasets = './datasets/multipico'
 data_path_models = './models/rhetorical-figures'
+data_path_prediction = './models/multipico_classification'
 os.makedirs(data_path_models, exist_ok=True)
 
 models_name = [
-    #'meta-llama/Llama-3.1-8B-Instruct',
-    #'mistralai/Ministral-8B-Instruct-2410',
-    'swap-uniba/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA',
-    #'Qwen/Qwen2.5-7B-Instruct',
-    #'sapienzanlp/Minerva-7B-instruct-v1.0'
+    'mistralai/Ministral-8B-Instruct-2410',
 ]
 
 # LoRA parameters
@@ -80,36 +77,19 @@ print("Inizializzazione completata")
 def prepare_dataset(split):
     print(f"Preparing {data_path_datasets}/{split}.csv dataset per la baseline...")
     df = pd.read_csv(f'{data_path_datasets}/{split}.csv')
-    df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    rhetorical_figures = {
-        'ANALOGY': 'draws a comparison between different domains to create irony through similarity',
-        'HYPERBOLE': 'exaggerates to create a strong ironic or humorous effect',
-        'EUPHEMISM': 'softens unpleasant ideas to convey irony indirectly',
-        'RHETORICAL QUESTION': 'asks a question not to get an answer but to highlight a contradiction or irony',
-        'CONTEXT SHIFT': 'introduces a sudden change in tone or topic to create an ironic effect',
-        'FALSE ASSERTION': 'states something clearly untrue to produce irony',
-        'OXYMORON': 'combines contradictory terms to highlight absurdity or irony',
-        'OTHER': 'uses situational irony or humor not covered by other categories'
-    }
     instruction = (
         "Analyze the ironic sentence (INPUT) and identify which rhetorical figure (OUTPUT) it uses. "
         "Explain your choice briefly."
     )
     dataset = []
     for _, row in df.iterrows():
-        figure = row['output']
-        explanation = rhetorical_figures.get(figure, "no explanation available.")
-        output = (
-            f"The sentence {explanation}. That's why is an example of {figure}."
-        )
+        input = row['reply'] + row['post']
         dataset.append({
             'instruction': instruction,
-            'id': row['id'],
-            'input': row['input'],
-            'rhetorical_figure': figure,
-            'explanation': explanation,
-            'output': output
+            'reply_id': row['reply_id'],
+            'post_id': row['post_id'],
+            'input': input,
         })
     return Dataset.from_pandas(pd.DataFrame(dataset))
 
@@ -173,43 +153,25 @@ def model_generation(pipe, test_dataset, output_path):
             result = pipe(f"<s> [INST] {record['instruction']} [/INST] [INPUT] {record['input']} [/INPUT] [OUTPUT]")
             prediction = clear_output(result[0]['generated_text'])
             print(f'Result: {result} | Output: {result[0]["generated_text"]} | Prediction: {prediction}')
-            records.append((record['id'], record['input'], prediction, record['rhetorical_figure'], record['explanation'], record['output'], result[0]['generated_text']))
+            records.append((record['reply_id'], record['post_id'], record['input'], prediction, result[0]['generated_text']))
 
             if i % 5 == 0:
                 gc.collect()
                 torch.cuda.empty_cache()
 
-        df = pd.DataFrame(records, columns=['id', 'input', 'prediction', 'rhetorical_figure', 'explanation', 'expected_output', 'raw_generation'])
+        df = pd.DataFrame(records, columns=['reply_id','post_id', 'input', 'prediction', 'raw_generation'])
         df.to_csv(output_path, index=False)
 
 # Caricamento dataset
-train_dataset = prepare_dataset('train')
-eval_dataset = prepare_dataset('dev')
-test_dataset = prepare_dataset('test')
-#test_dataset_baseline = prepare_dataset_baseline('test')
+dataset = prepare_dataset('multipico_ita_filtered')
 
 print("Dataset caricato correttamente")
 
-print("Inizio fine-tuning")
-for model_name in models_name:
-    print(f"Fine-tuning {model_name}...")
-    clean_model_name = model_name.split('/')[1]
-    output_path = f'{data_path_models}/fine-tuned-{clean_model_name}'
-
-    model, tokenizer = load_model(model_name)
-    trainer = train(model, tokenizer, train_dataset, eval_dataset)
-    trainer.save_model(f'{output_path}')
-
-    del model, tokenizer, trainer
-    gc.collect()
-    torch.cuda.empty_cache()
-
-print("Fine-tuning completato")
 print("Inizio generazione")
 for model_name in models_name:
     print(f"Generazione {model_name}...")
     clean_model_name = model_name.split('/')[1]
-    output_path = f'{data_path_models}/fine-tuned-{clean_model_name}'
+    output_path = f'{data_path_prediction}/fine-tuned-{clean_model_name}'
 
     fine_tuned_model, fine_tuned_tokenizer = load_fine_tuned_model(model_name, f'{output_path}')
 
@@ -223,35 +185,10 @@ for model_name in models_name:
     )
 
     for i in range(1):
-        model_generation(pipe, test_dataset, f'{output_path}-decoding-{i+1}.csv')
+        model_generation(pipe, dataset, f'{output_path}-decoding-{i+1}.csv')
 
     print(f"Generazione completata per {model_name}")
 
     del fine_tuned_model, fine_tuned_tokenizer, pipe
     gc.collect()
     torch.cuda.empty_cache()
-
-### BASELINE
-#print("Inizio generazione")
-#for model_name in models_name:
-#    print(f"Generazione {model_name}...")   
-#
-#    model, tokenizer = load_model(model_name)
-#
-#    pipe = pipeline(
-#        'text-generation',
-#        model=model,
-#        tokenizer=tokenizer,
-#        max_length=500,
-#        temperature=0.1,
-#        torch_dtype=torch.bfloat16
-#    )
-
-#    for i in range(1):
-#       model_generation(pipe, test_dataset_baseline, f'{data_path_models}/baseline-{i+1}.csv')
-
-#    print(f"Generazione completata per {model_name}")
-
-#    del model, tokenizer, pipe
-#    gc.collect()
-#    torch.cuda.empty_cache()    
